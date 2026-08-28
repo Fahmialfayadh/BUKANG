@@ -10,18 +10,31 @@ from supabase import create_client
 load_dotenv()
 
 def parse_single_csv(filepath: str, default_prodi: str = "Teknik Informatika") -> list:
-    """Parses a single CSV file, handling header offsets and cleaning NRP/Nama fields."""
+    """Parses a single CSV file, handling header offsets, kelas extraction, and cleaning NRP/Nama fields."""
     if not os.path.exists(filepath):
         print(f"Error: File '{filepath}' tidak ditemukan.")
         return []
 
     filename = os.path.basename(filepath)
+    
+    # Determine prodi and kelas group from filename
     if "RKA" in filename:
         prodi = "RKA"
+        kelas = "RKA"
     elif "RPL" in filename:
         prodi = "RPL"
+        kelas = "RPL"
+    elif "IUP" in filename:
+        prodi = default_prodi
+        kelas = "IUP"
     else:
         prodi = default_prodi
+        # Extract class letter (A, B, C, D, E) from filename
+        kelas = "A"
+        for k in ["A", "B", "C", "D", "E"]:
+            if f"- {k}.csv" in filename or f"-{k}.csv" in filename or f" {k}.csv" in filename:
+                kelas = k
+                break
 
     with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
         lines = f.readlines()
@@ -57,27 +70,27 @@ def parse_single_csv(filepath: str, default_prodi: str = "Teknik Informatika") -
         nrp = "".join([c for c in nrp_raw if c.isdigit()])
         nama = str(row["Nama"]).strip()
 
-        # Check if prodi_asal column exists in CSV
         col_prodi = row.get("prodi_asal") or row.get("Prodi") or prodi
+        col_kelas = row.get("kelas") or row.get("Kelas") or kelas
 
         if len(nrp) >= 8 and len(nama) > 1:
             records.append({
                 "nama": nama,
                 "nrp": nrp,
                 "prodi_asal": str(col_prodi).strip(),
+                "kelas": str(col_kelas).strip(),
                 "sudah_difoto": False
             })
     return records
 
 def import_all(target_path: str):
-    """Imports CSV files into Supabase database."""
+    """Imports CSV files into Supabase database with kelas breakdown."""
     records = []
     
     if os.path.isdir(target_path):
         csv_files = glob.glob(os.path.join(target_path, "*.csv"))
         print(f"Menemukan {len(csv_files)} file CSV di folder '{target_path}'")
         for f in sorted(csv_files):
-            # Skip generated combined files
             if "mahasiswa_tc25_all.csv" in f or "sample_mahasiswa.csv" in f:
                 continue
             rec = parse_single_csv(f)
@@ -92,8 +105,8 @@ def import_all(target_path: str):
 
     print(f"\nTotal data mahasiswa yang siap di-import: {len(records)}")
     
-    # Save a combined clean CSV copy
-    combined_df = pd.DataFrame(records)[["nama", "nrp", "prodi_asal"]]
+    # Save combined clean CSV copy with kelas column
+    combined_df = pd.DataFrame(records)[["nama", "nrp", "prodi_asal", "kelas"]]
     combined_path = "database/mahasiswa_tc25_all.csv"
     combined_df.to_csv(combined_path, index=False)
     combined_df.to_csv("sample_mahasiswa.csv", index=False)
@@ -104,7 +117,6 @@ def import_all(target_path: str):
 
     if not url or not key:
         print("\nPeringatan: SUPABASE_URL dan SUPABASE_KEY belum diatur.")
-        print("File CSV gabungan sudah dibuat. Set environment variable / .env lalu jalankan script ini lagi untuk mengunggah ke Supabase.")
         return
 
     supabase = create_client(url, key)

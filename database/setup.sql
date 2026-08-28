@@ -12,6 +12,7 @@ create table if not exists mahasiswa (
     nama text not null,
     nrp text unique not null,
     prodi_asal text,
+    kelas text,
     sudah_difoto boolean default false,
     photo_path text,
     asal text,
@@ -28,16 +29,16 @@ alter table mahasiswa add column if not exists latitude double precision;
 alter table mahasiswa add column if not exists longitude double precision;
 alter table mahasiswa add column if not exists lokasi_gps text;
 alter table mahasiswa add column if not exists hobi text;
-
-
+alter table mahasiswa add column if not exists kelas text;
 
 -- 3. Create Indexes for Fast Lookup & Fuzzy Search
 create index if not exists idx_nama_trgm on mahasiswa using gin (nama gin_trgm_ops);
 create index if not exists idx_nrp on mahasiswa (nrp);
 create index if not exists idx_sudah_difoto on mahasiswa (sudah_difoto);
+create index if not exists idx_kelas on mahasiswa (kelas);
 
 -- 4. RPC Function: search_mahasiswa
--- Supports fuzzy name search via pg_trgm + fallback ILIKE for exact/partial NRP & Nama match
+-- Supports fuzzy name search via pg_trgm + fallback ILIKE for exact/partial NRP, Nama & Kelas match
 create or replace function search_mahasiswa(keyword text, limit_n int default 8)
 returns setof mahasiswa as $$
 begin
@@ -49,6 +50,7 @@ begin
         or nama ilike '%' || keyword || '%' 
         or nrp ilike '%' || keyword || '%'
         or prodi_asal ilike '%' || keyword || '%'
+        or kelas ilike '%' || keyword || '%'
     order by 
         similarity(nama, keyword) desc,
         nama asc
@@ -57,5 +59,5 @@ end;
 $$ language plpgsql;
 
 -- 5. Storage Bucket Setup Instructions:
--- In Supabase Dashboard -> Storage -> Create a new bucket named: 'foto-angkatan'
+-- In Supabase Dashboard -> Storage -> Create a new bucket named: 'foto-angkatan' or 'BUKU-ANGKATAN'
 -- Set privacy as desired (Private with signed URLs or Public for direct viewing).

@@ -66,8 +66,6 @@ st.markdown("""
         -webkit-transform: scaleX(-1) !important;
     }
     </style>
-
-
 """, unsafe_allow_html=True)
 
 # Application Header
@@ -113,7 +111,7 @@ with tab_input:
     st.markdown("---")
     st.subheader("2. Identitas & Pencarian Mahasiswa")
 
-    search_query = st.text_input("Ketik Nama atau NRP", placeholder="Contoh: Budi / 5025211001")
+    search_query = st.text_input("Ketik Nama, NRP, atau Kelas", placeholder="Contoh: Budi / 5025251018 / Kelas A")
 
     selected_student = None
     manual_mode = st.checkbox("Mahasiswa tidak ditemukan di pencarian (Tambah Manual)")
@@ -123,13 +121,15 @@ with tab_input:
         st.write("Form Tambah Mahasiswa Baru:")
         manual_nama = st.text_input("Nama Lengkap Mahasiswa")
         manual_nrp = st.text_input("NRP Mahasiswa")
-        manual_prodi = st.text_input("Prodi Asal")
+        manual_prodi = st.selectbox("Prodi Asal", ["Teknik Informatika", "RKA", "RPL"])
+        manual_kelas = st.selectbox("Kelas / Sesi", ["A", "B", "C", "D", "E", "IUP", "RKA", "RPL", "Manual"])
         
         if manual_nama and manual_nrp:
             selected_student = {
                 "nama": manual_nama.strip(),
                 "nrp": manual_nrp.strip(),
                 "prodi_asal": manual_prodi.strip(),
+                "kelas": manual_kelas.strip(),
                 "is_manual": True
             }
         st.markdown('</div>', unsafe_allow_html=True)
@@ -138,7 +138,7 @@ with tab_input:
             results = cari_mahasiswa(search_query)
             if results:
                 options = {
-                    f"{item['nama']} | NRP: {item['nrp']} ({item.get('prodi_asal', '-')})": item
+                    f"{item['nama']} | NRP: {item['nrp']} (Kelas {item.get('kelas', '-')} - {item.get('prodi_asal', '-')})": item
                     for item in results
                 }
                 selected_label = st.selectbox("Pilih Mahasiswa dari Hasil Pencarian", list(options.keys()))
@@ -149,7 +149,7 @@ with tab_input:
 
     # Show selected student status summary
     if selected_student:
-        st.info(f"Terpilih: **{selected_student['nama']}** (NRP: {selected_student['nrp']}) - {selected_student.get('prodi_asal', '-')}")
+        st.info(f"Terpilih: **{selected_student['nama']}** (NRP: {selected_student['nrp']}) - Kelas **{selected_student.get('kelas', '-')}** [{selected_student.get('prodi_asal', '-')}]")
         
         # Check if already photographed (Retake Warning)
         if not selected_student.get("is_manual", False):
@@ -221,7 +221,8 @@ with tab_input:
                         tambah_mahasiswa_manual(
                             selected_student["nama"],
                             selected_student["nrp"],
-                            selected_student.get("prodi_asal", "")
+                            selected_student.get("prodi_asal", ""),
+                            selected_student.get("kelas", "Manual")
                         )
 
                     # 3. Save photo, metadata, hobi & geotag to Supabase
@@ -235,7 +236,6 @@ with tab_input:
                         lon=final_lon
                     )
 
-
                 st.success(f"Berhasil! Foto ({size_kb} KB) dan data untuk {selected_student['nama']} ({selected_student['nrp']}) telah tersimpan.")
                 st.balloons()
             except Exception as err:
@@ -247,43 +247,71 @@ with tab_input:
 # TAB 2: TRACKING PROGRESS
 # -----------------------------------------------------------------------------
 with tab_progress:
-    st.subheader("Dashboard Progress Pendataan")
+    st.subheader("Dashboard Progress Pendataan Per Sesi / Kelas")
     
-    done, total = get_stats()
-    percentage = (done / total * 100) if total > 0 else 0.0
+    all_students = get_all_mahasiswa()
+    total_all = len(all_students)
+    done_all = sum(1 for s in all_students if s.get("sudah_difoto"))
+    pct_all = (done_all / total_all * 100) if total_all > 0 else 0.0
 
     col1, col2 = st.columns(2)
     with col1:
-        st.metric("Total Mahasiswa Difoto", f"{done} / {total}")
+        st.metric("Total Mahasiswa Difoto", f"{done_all} / {total_all}")
     with col2:
-        st.metric("Persentase Selesai", f"{percentage:.1f}%")
+        st.metric("Persentase Keseluruhan", f"{pct_all:.1f}%")
 
-    st.progress(percentage / 100.0)
+    st.progress(pct_all / 100.0)
 
-    if total > 0 and percentage < 80.0:
-        st.warning(f"Progress masih di bawah target (80%). Masih ada {total - done} mahasiswa yang belum difoto.")
+    # Class Breakdown Progress Overview
+    st.markdown("---")
+    st.write("Progress Sesi per Kelas / Kelompok:")
+    
+    classes_list = ["A", "B", "C", "D", "E", "IUP", "RKA", "RPL"]
+    class_stats = {}
+    for c in classes_list:
+        sub = [s for s in all_students if s.get("kelas") == c]
+        c_tot = len(sub)
+        c_done = sum(1 for s in sub if s.get("sudah_difoto"))
+        c_pct = (c_done / c_tot * 100) if c_tot > 0 else 0.0
+        class_stats[c] = {"done": c_done, "total": c_tot, "pct": c_pct}
+
+    # Render class metrics in 4 columns grid
+    grid_cols = st.columns(4)
+    for idx, c in enumerate(classes_list):
+        with grid_cols[idx % 4]:
+            st.metric(f"Kelas {c}", f"{class_stats[c]['done']} / {class_stats[c]['total']}", f"{class_stats[c]['pct']:.0f}%")
 
     st.markdown("---")
     st.subheader("Daftar Mahasiswa Belum Difoto")
 
-    belum_list = get_mahasiswa_belum_difoto()
+    filter_kelas_tab = st.selectbox(
+        "Pilih Filter Sesi / Kelas",
+        ["Semua Sesi / Kelas", "Kelas A", "Kelas B", "Kelas C", "Kelas D", "Kelas E", "Kelas IUP", "Kelas RKA", "Kelas RPL"]
+    )
+    filter_name = st.text_input("Filter Nama / NRP", placeholder="Cari nama atau NRP...")
+
+    belum_list = [s for s in all_students if not s.get("sudah_difoto")]
+
     if not belum_list:
         st.success("Luar biasa! Semua mahasiswa terdaftar sudah selesai difoto.")
     else:
-        filter_text = st.text_input("Filter daftar nama belum difoto", placeholder="Cari nama / prodi...")
-        
+        # Filter by selected class session
+        if filter_kelas_tab != "Semua Sesi / Kelas":
+            target_c = filter_kelas_tab.replace("Kelas ", "").strip()
+            belum_list = [s for s in belum_list if s.get("kelas") == target_c]
+
         df_belum = pd.DataFrame(belum_list)
-        if "nama" in df_belum.columns:
-            display_cols = ["nama", "nrp", "prodi_asal"]
+        if not df_belum.empty and "nama" in df_belum.columns:
+            display_cols = ["nama", "nrp", "prodi_asal", "kelas"]
             existing_cols = [c for c in display_cols if c in df_belum.columns]
             df_filtered = df_belum[existing_cols].copy()
-            df_filtered.columns = ["Nama", "NRP", "Prodi Asal"][:len(existing_cols)]
+            df_filtered.columns = ["Nama", "NRP", "Prodi Asal", "Kelas / Sesi"][:len(existing_cols)]
 
-            if filter_text.strip():
-                mask = df_filtered.apply(lambda row: row.astype(str).str.contains(filter_text, case=False).any(), axis=1)
+            if filter_name.strip():
+                mask = df_filtered.apply(lambda row: row.astype(str).str.contains(filter_name, case=False).any(), axis=1)
                 df_filtered = df_filtered[mask]
 
-            st.write(f"Menampilkan {len(df_filtered)} dari {len(belum_list)} mahasiswa belum difoto:")
+            st.write(f"Menampilkan {len(df_filtered)} mahasiswa belum difoto:")
             st.dataframe(df_filtered, use_container_width=True, hide_index=True)
 
 
@@ -292,7 +320,7 @@ with tab_progress:
 # -----------------------------------------------------------------------------
 with tab_tools:
     st.subheader("1. Ekspor Data ke Excel")
-    st.write("Unduh seluruh data mahasiswa beserta status pendataan, informasi tambahan, Geotag lokasi, dan URL foto dari Supabase Storage.")
+    st.write("Unduh seluruh data mahasiswa beserta status pendataan, Kelas/Sesi, Geotag lokasi, dan URL foto dari Supabase Storage.")
 
     if st.button("Generate File Excel"):
         with st.spinner("Mengambil data dari Supabase..."):

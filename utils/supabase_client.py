@@ -1,9 +1,26 @@
 import os
+import pandas as pd
 import streamlit as st
 from supabase import create_client, Client
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# Cache local NRP to Kelas lookup mapping from database/mahasiswa_tc25_all.csv
+@st.cache_data
+def load_kelas_map():
+    """Loads local NRP -> Kelas mapping fallback dict from CSV."""
+    csv_path = "database/mahasiswa_tc25_all.csv"
+    if not os.path.exists(csv_path):
+        csv_path = "sample_mahasiswa.csv"
+    if os.path.exists(csv_path):
+        try:
+            df = pd.read_csv(csv_path)
+            if "nrp" in df.columns and "kelas" in df.columns:
+                return dict(zip(df["nrp"].astype(str), df["kelas"].astype(str)))
+        except Exception:
+            pass
+    return {}
 
 @st.cache_resource
 def get_supabase_client() -> Client:
@@ -14,7 +31,6 @@ def get_supabase_client() -> Client:
     url = None
     key = None
 
-    # Try accessing Streamlit Secrets first
     try:
         if "SUPABASE_URL" in st.secrets:
             url = st.secrets["SUPABASE_URL"]
@@ -22,8 +38,6 @@ def get_supabase_client() -> Client:
     except Exception:
         pass
 
-    
-    # Fallback to environment variables
     if not url:
         url = os.getenv("SUPABASE_URL")
         key = os.getenv("SUPABASE_KEY") or os.getenv("SUPABASE_SERVICE_KEY")
@@ -46,35 +60,52 @@ def get_bucket_name() -> str:
         pass
     return os.getenv("SUPABASE_BUCKET", "foto-angkatan")
 
+def enrich_student_kelas(student_dict: dict) -> dict:
+    """Ensures student record dictionary contains valid kelas field."""
+    if not student_dict:
+        return student_dict
+    
+    if not student_dict.get("kelas") or str(student_dict.get("kelas")).lower() == "none":
+        kelas_map = load_kelas_map()
+        nrp_str = str(student_dict.get("nrp", ""))
+        if nrp_str in kelas_map:
+            student_dict["kelas"] = kelas_map[nrp_str]
+        elif student_dict.get("prodi_asal") in ["RKA", "RPL"]:
+            student_dict["kelas"] = student_dict["prodi_asal"]
+        else:
+            student_dict["kelas"] = "Lainnya"
+    return student_dict
 
-def cari_mahasiswa(keyword: str, limit: int = 8):
+def cari_mahasiswa(keyword: str, limit: int = 10):
     """
-    Fuzzy search student by name/NRP using pg_trgm RPC function,
+    Fuzzy search student by name/NRP/kelas using pg_trgm RPC function,
     with fallback to ILIKE query if RPC is unavailable.
     """
     client = get_supabase_client()
     if not client or not keyword.strip():
         return []
 
+    results = []
     try:
-        # Try calling stored procedure RPC search_mahasiswa
         res = client.rpc("search_mahasiswa", {"keyword": keyword.strip(), "limit_n": limit}).execute()
         if res.data:
-            return res.data
+            results = res.data
     except Exception:
         pass
 
-    # Fallback query if RPC does not exist
-    try:
-        res = client.table("mahasiswa") \
-            .select("*") \
-            .or_(f"nama.ilike.%{keyword}%,nrp.ilike.%{keyword}%") \
-            .limit(limit) \
-            .execute()
-        return res.data or []
-    except Exception as e:
-        st.error(f"Error pencarian: {str(e)}")
-        return []
+    if not results:
+        try:
+            res = client.table("mahasiswa") \
+                .select("*") \
+                .or_(f"nama.ilike.%{keyword}%,nrp.ilike.%{keyword}%") \
+                .limit(limit) \
+                .execute()
+            results = res.data or []
+        except Exception as e:
+            st.error(f"Error pencarian: {str(e)}")
+            return []
+
+    return [enrich_student_kelas(r) for r in results]
 
 def get_mahasiswa_by_nrp(nrp: str):
     """Retrieve single student record by exact NRP."""
@@ -84,7 +115,7 @@ def get_mahasiswa_by_nrp(nrp: str):
     try:
         res = client.table("mahasiswa").select("*").eq("nrp", nrp).execute()
         if res.data and len(res.data) > 0:
-            return res.data[0]
+            return enrich_student_kelas(res.data[0])
         return None
     except Exception:
         return None
@@ -138,21 +169,21 @@ def simpan_foto_dan_data(
     except Exception as db_err:
         raise Exception(f"Gagal memperbarui data mahasiswa di database: {str(db_err)}")
 
-
-
-def tambah_mahasiswa_manual(nama: str, nrp: str, prodi_asal: str):
+def tambah_mahasiswa_manual(nama: str, nrp: str, prodi_asal: str, kelas: str = "Manual"):
     """Insert a new student manually if not present in CSV."""
     client = get_supabase_client()
     if not client:
         raise Exception("Client Supabase tidak terhubung")
 
     try:
-        res = client.table("mahasiswa").insert({
+        payload = {
             "nama": nama.strip(),
             "nrp": nrp.strip(),
             "prodi_asal": prodi_asal.strip(),
+            "kelas": kelas.strip(),
             "sudah_difoto": False
-        }).execute()
+        }
+        res = client.table("mahasiswa").insert(payload).execute()
         return res.data
     except Exception as e:
         raise Exception(f"Gagal menambah mahasiswa manual: {str(e)}")
@@ -173,23 +204,25 @@ def get_stats():
         return 0, 0
 
 def get_mahasiswa_belum_difoto():
-    """Retrieve list of students who haven't been photographed yet."""
+    """Retrieve list of students who haven't been photographed yet with kelas enriched."""
     client = get_supabase_client()
     if not client:
         return []
     try:
         res = client.table("mahasiswa").select("*").eq("sudah_difoto", False).order("nama").execute()
-        return res.data or []
+        raw_list = res.data or []
+        return [enrich_student_kelas(r) for r in raw_list]
     except Exception:
         return []
 
 def get_all_mahasiswa():
-    """Retrieve all student records for export."""
+    """Retrieve all student records for export with kelas enriched."""
     client = get_supabase_client()
     if not client:
         return []
     try:
         res = client.table("mahasiswa").select("*").order("nama").execute()
-        return res.data or []
+        raw_list = res.data or []
+        return [enrich_student_kelas(r) for r in raw_list]
     except Exception:
         return []
