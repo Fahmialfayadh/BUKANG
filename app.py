@@ -58,7 +58,16 @@ st.markdown("""
         border-radius: 0.375rem;
         padding: 0.6rem 1rem;
     }
+    /* Mirror live camera video stream AND captured still preview image */
+    [data-testid="stCameraInput"] video,
+    [data-testid="stCameraInput"] img,
+    [data-testid="stCameraInput"] canvas {
+        transform: scaleX(-1) !important;
+        -webkit-transform: scaleX(-1) !important;
+    }
     </style>
+
+
 """, unsafe_allow_html=True)
 
 # Application Header
@@ -170,7 +179,8 @@ with tab_input:
     st.subheader("3. Informasi Tambahan & Geotag")
 
     asal_input = st.text_input("Kota / Daerah Asal", placeholder="Contoh: Surabaya / Jakarta")
-    impression_input = st.text_area("First Impression / Catatan Singkat", placeholder="Contoh: Ramah, hobi main basket")
+    hobi_input = st.text_input("Hobi", placeholder="Contoh: Basket, Coding, Gaming")
+    impression_input = st.text_area("First Impression / Catatan Singkat", placeholder="Contoh: Ramah, supel")
 
     # Dynamic Geotag Status Display
     if auto_lat is not None and auto_lon is not None:
@@ -192,7 +202,8 @@ with tab_input:
         else:
             try:
                 with st.spinner("Mengompresi foto, memasang Geotag watermark & mengunggah ke Supabase..."):
-                    # 1. Compress Image & Stamp Geotag Watermark onto Photo
+                    # 1. Compress Image & Stamp Geotag Watermark onto Photo (Mirrored for Camera)
+                    is_from_camera = (foto_input == cam_photo) if 'cam_photo' in locals() else True
                     compressed_bytes = compress_and_stamp_image(
                         foto_input,
                         max_size=1080,
@@ -200,7 +211,8 @@ with tab_input:
                         lat=final_lat,
                         lon=final_lon,
                         nrp=selected_student["nrp"],
-                        nama=selected_student["nama"]
+                        nama=selected_student["nama"],
+                        mirror_photo=is_from_camera
                     )
                     size_kb = get_image_size_kb(compressed_bytes)
 
@@ -212,15 +224,17 @@ with tab_input:
                             selected_student.get("prodi_asal", "")
                         )
 
-                    # 3. Save photo, metadata & geotag to Supabase
+                    # 3. Save photo, metadata, hobi & geotag to Supabase
                     simpan_foto_dan_data(
                         selected_student["nrp"],
                         compressed_bytes,
                         asal_input,
+                        hobi_input,
                         impression_input,
                         lat=final_lat,
                         lon=final_lon
                     )
+
 
                 st.success(f"Berhasil! Foto ({size_kb} KB) dan data untuk {selected_student['nama']} ({selected_student['nrp']}) telah tersimpan.")
                 st.balloons()

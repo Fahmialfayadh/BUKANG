@@ -15,6 +15,7 @@ create table if not exists mahasiswa (
     sudah_difoto boolean default false,
     photo_path text,
     asal text,
+    hobi text,
     first_impression text,
     latitude double precision,
     longitude double precision,
@@ -26,6 +27,8 @@ create table if not exists mahasiswa (
 alter table mahasiswa add column if not exists latitude double precision;
 alter table mahasiswa add column if not exists longitude double precision;
 alter table mahasiswa add column if not exists lokasi_gps text;
+alter table mahasiswa add column if not exists hobi text;
+
 
 
 -- 3. Create Indexes for Fast Lookup & Fuzzy Search

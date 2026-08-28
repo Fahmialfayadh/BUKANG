@@ -197,11 +197,12 @@ def compress_and_stamp_image(
     lat: float = None,
     lon: float = None,
     nrp: str = "",
-    nama: str = ""
+    nama: str = "",
+    mirror_photo: bool = True
 ) -> bytes:
     """
-    Compresses image and stamps an authentic GPS Map Camera style geotag overlay
-    (Mini Map inset + Reverse Geocoded Address + Lat/Long + Timestamp + Identitas).
+    Compresses image, mirrors photo horizontally (selfie mirror effect), and stamps an authentic 
+    GPS Map Camera style geotag overlay (Mini Map inset + Reverse Geocoded Address + Lat/Long + Timestamp + Identitas).
     """
     if isinstance(image_input, Image.Image):
         img = image_input.copy()
@@ -216,21 +217,29 @@ def compress_and_stamp_image(
     except Exception:
         pass
 
-    # 2. Resize maintaining aspect ratio
+    # 2. Mirror photo horizontally for selfie camera consistency
+    if mirror_photo:
+        try:
+            img = ImageOps.mirror(img)
+        except Exception:
+            pass
+
+    # 3. Resize maintaining aspect ratio
     img.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
     img_rgba = img.convert("RGBA")
     width, height = img_rgba.size
+
 
     # Prepare Geotag data
     address_str = reverse_geocode(lat, lon) if (lat and lon) else "Surabaya, Jawa Timur, Indonesia"
     time_str = datetime.datetime.now().strftime("%d/%m/%y %I:%M %p GMT+07:00")
 
-    # Dimensions for GPS Map Camera Card Overlay
-    card_w = min(width - 24, int(width * 0.95))
-    card_h = int(height * 0.28) if height > 600 else 160
-    card_h = max(140, min(220, card_h))
+    # Compact Dimensions for GPS Map Camera Card Overlay (Bottom Corner)
+    card_w = min(width - 24, int(width * 0.70))
+    card_h = int(height * 0.15) if height > 600 else 110
+    card_h = max(96, min(130, card_h))
 
-    map_size = card_h - 24
+    map_size = card_h - 16
 
     # Fetch mini static map
     map_img = fetch_static_map(lat, lon, width=map_size, height=map_size)
@@ -248,51 +257,49 @@ def compress_and_stamp_image(
         [(card_x, card_y), (card_x + card_w, card_y + card_h)],
         fill=(15, 23, 42, 215),
         outline=(51, 65, 85, 255),
-        width=2
+        width=1
     )
 
     # Paste Mini Map inset on left side
-    overlay.paste(map_img, (card_x + 12, card_y + 12))
+    overlay.paste(map_img, (card_x + 8, card_y + 8))
 
     # Load font
     try:
-        font_main = ImageFont.truetype("DejaVuSans.ttf", max(11, int(card_h * 0.08)))
-        font_bold = ImageFont.truetype("DejaVuSans-Bold.ttf", max(12, int(card_h * 0.09)))
+        font_main = ImageFont.truetype("DejaVuSans.ttf", max(9, int(card_h * 0.08)))
+        font_bold = ImageFont.truetype("DejaVuSans-Bold.ttf", max(10, int(card_h * 0.09)))
     except Exception:
         font_main = ImageFont.load_default()
         font_bold = ImageFont.load_default()
 
     # Right side text coordinates
-    text_x = card_x + map_size + 24
-    curr_y = card_y + 10
+    text_x = card_x + map_size + 16
+    curr_y = card_y + 6
+    line_h = max(11, int(card_h * 0.14))
 
     # 1. Badge Header: GPS Map Camera
     draw.text((text_x, curr_y), "GPS Map Camera", fill=(56, 189, 248, 255), font=font_bold)
-    curr_y += int(card_h * 0.13)
+    curr_y += line_h
 
-    # 2. Address Lines
-    addr_lines = wrap_text(address_str, max_chars=35)
+    # 2. Address Lines (max 2 lines for compact height)
+    addr_lines = wrap_text(address_str, max_chars=32)[:2]
     for line in addr_lines:
         draw.text((text_x, curr_y), line, fill=(241, 245, 249, 255), font=font_main)
-        curr_y += int(card_h * 0.12)
-
-    curr_y += 2
+        curr_y += line_h
 
     # 3. Lat & Long
     display_lat = lat if lat is not None else -7.281900
     display_lon = lon if lon is not None else 112.795100
-    draw.text((text_x, curr_y), f"Lat  {display_lat:.6f}°", fill=(203, 213, 225, 255), font=font_main)
-    curr_y += int(card_h * 0.12)
-    draw.text((text_x, curr_y), f"Long {display_lon:.6f}°", fill=(203, 213, 225, 255), font=font_main)
-    curr_y += int(card_h * 0.12)
+    draw.text((text_x, curr_y), f"Lat {display_lat:.6f}° Long {display_lon:.6f}°", fill=(203, 213, 225, 255), font=font_main)
+    curr_y += line_h
 
     # 4. Nama & NRP + Timestamp
     id_line = f"{nama} ({nrp})" if nama or nrp else ""
     if id_line:
         draw.text((text_x, curr_y), id_line, fill=(251, 191, 36, 255), font=font_bold)
-        curr_y += int(card_h * 0.12)
+        curr_y += line_h
 
     draw.text((text_x, curr_y), time_str, fill=(148, 163, 184, 255), font=font_main)
+
 
     # Composite overlay onto original image
     stamped_img = Image.alpha_composite(img_rgba, overlay).convert("RGB")

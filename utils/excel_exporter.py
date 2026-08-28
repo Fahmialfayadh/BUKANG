@@ -9,7 +9,7 @@ def export_mahasiswa_to_excel(records: list) -> bytes:
     """
     if not records:
         df = pd.DataFrame(columns=[
-            "NRP", "Nama", "Prodi Asal", "Status Foto", "Asal", "First Impression", 
+            "NRP", "Nama", "Prodi Asal", "Status Foto", "Asal", "Hobi", "First Impression", 
             "Lokasi GPS", "Google Maps Link", "Waktu Foto", "URL Foto"
         ])
     else:
@@ -38,6 +38,7 @@ def export_mahasiswa_to_excel(records: list) -> bytes:
                 "Prodi Asal": r.get("prodi_asal", ""),
                 "Status Foto": "Sudah" if r.get("sudah_difoto") else "Belum",
                 "Asal": r.get("asal", ""),
+                "Hobi": r.get("hobi", ""),
                 "First Impression": r.get("first_impression", ""),
                 "Lokasi GPS": r.get("lokasi_gps", ""),
                 "Google Maps Link": gmaps_link,
@@ -45,6 +46,7 @@ def export_mahasiswa_to_excel(records: list) -> bytes:
                 "URL Foto": photo_url
             })
         df = pd.DataFrame(rows)
+
 
     # Write to Excel BytesIO buffer using openpyxl engine
     output = io.BytesIO()

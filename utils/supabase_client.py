@@ -93,12 +93,13 @@ def simpan_foto_dan_data(
     nrp: str, 
     foto_bytes: bytes, 
     asal: str, 
+    hobi: str,
     first_impression: str,
     lat: float = None,
     lon: float = None
 ) -> bool:
     """
-    Upload compressed photo to Supabase Storage and update student record in DB with Geotag.
+    Upload compressed photo to Supabase Storage and update student record in DB with Geotag & Hobi.
     """
     client = get_supabase_client()
     if not client:
@@ -123,6 +124,7 @@ def simpan_foto_dan_data(
             "sudah_difoto": True,
             "photo_path": file_path,
             "asal": asal.strip() if asal else "",
+            "hobi": hobi.strip() if hobi else "",
             "first_impression": first_impression.strip() if first_impression else "",
             "waktu_foto": "now()"
         }
@@ -135,6 +137,7 @@ def simpan_foto_dan_data(
         return True
     except Exception as db_err:
         raise Exception(f"Gagal memperbarui data mahasiswa di database: {str(db_err)}")
+
 
 
 def tambah_mahasiswa_manual(nama: str, nrp: str, prodi_asal: str):
