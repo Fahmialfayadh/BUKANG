@@ -1,4 +1,5 @@
 streamlit>=1.30.0
+streamlit-js-eval>=1.0.0
 supabase>=2.0.0
 pillow>=10.0.0
 pandas>=2.0.0

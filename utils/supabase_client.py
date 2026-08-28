@@ -89,9 +89,16 @@ def get_mahasiswa_by_nrp(nrp: str):
     except Exception:
         return None
 
-def simpan_foto_dan_data(nrp: str, foto_bytes: bytes, asal: str, first_impression: str) -> bool:
+def simpan_foto_dan_data(
+    nrp: str, 
+    foto_bytes: bytes, 
+    asal: str, 
+    first_impression: str,
+    lat: float = None,
+    lon: float = None
+) -> bool:
     """
-    Upload compressed photo to Supabase Storage and update student record in DB.
+    Upload compressed photo to Supabase Storage and update student record in DB with Geotag.
     """
     client = get_supabase_client()
     if not client:
@@ -100,7 +107,7 @@ def simpan_foto_dan_data(nrp: str, foto_bytes: bytes, asal: str, first_impressio
     bucket_name = get_bucket_name()
     file_path = f"{nrp}.jpg"
 
-    # 1. Upload photo bytes to Storage (upsert = true allows overwrite on retake)
+    # 1. Upload photo bytes to Storage
     try:
         client.storage.from_(bucket_name).upload(
             file_path,
@@ -108,21 +115,27 @@ def simpan_foto_dan_data(nrp: str, foto_bytes: bytes, asal: str, first_impressio
             file_options={"content-type": "image/jpeg", "upsert": "true"}
         )
     except Exception as upload_err:
-        # If upload fails, throw clear exception
         raise Exception(f"Gagal mengunggah foto ke storage ({bucket_name}): {str(upload_err)}")
 
     # 2. Update record in table mahasiswa
     try:
-        client.table("mahasiswa").update({
+        update_payload = {
             "sudah_difoto": True,
             "photo_path": file_path,
             "asal": asal.strip() if asal else "",
             "first_impression": first_impression.strip() if first_impression else "",
             "waktu_foto": "now()"
-        }).eq("nrp", nrp).execute()
+        }
+        if lat is not None and lon is not None:
+            update_payload["latitude"] = lat
+            update_payload["longitude"] = lon
+            update_payload["lokasi_gps"] = f"{lat:.6f}, {lon:.6f}"
+
+        client.table("mahasiswa").update(update_payload).eq("nrp", nrp).execute()
         return True
     except Exception as db_err:
         raise Exception(f"Gagal memperbarui data mahasiswa di database: {str(db_err)}")
+
 
 def tambah_mahasiswa_manual(nama: str, nrp: str, prodi_asal: str):
     """Insert a new student manually if not present in CSV."""

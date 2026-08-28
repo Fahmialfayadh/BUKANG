@@ -5,11 +5,12 @@ from utils.supabase_client import get_supabase_client, get_bucket_name
 def export_mahasiswa_to_excel(records: list) -> bytes:
     """
     Generates Excel file (.xlsx) in bytes from student records data list,
-    including formatted columns and Supabase Storage photo URLs.
+    including formatted columns, Supabase Storage photo URLs, and Geotag links.
     """
     if not records:
         df = pd.DataFrame(columns=[
-            "NRP", "Nama", "Prodi Asal", "Status Foto", "Asal", "First Impression", "Waktu Foto", "URL Foto"
+            "NRP", "Nama", "Prodi Asal", "Status Foto", "Asal", "First Impression", 
+            "Lokasi GPS", "Google Maps Link", "Waktu Foto", "URL Foto"
         ])
     else:
         client = get_supabase_client()
@@ -21,12 +22,15 @@ def export_mahasiswa_to_excel(records: list) -> bytes:
             if r.get("photo_path"):
                 if client:
                     try:
-                        # Construct public URL or path string
                         photo_url = client.storage.from_(bucket_name).get_public_url(r["photo_path"])
                     except Exception:
                         photo_url = r.get("photo_path", "")
                 else:
                     photo_url = r.get("photo_path", "")
+
+            gmaps_link = ""
+            if r.get("latitude") is not None and r.get("longitude") is not None:
+                gmaps_link = f"https://www.google.com/maps?q={r['latitude']},{r['longitude']}"
 
             rows.append({
                 "NRP": r.get("nrp", ""),
@@ -35,6 +39,8 @@ def export_mahasiswa_to_excel(records: list) -> bytes:
                 "Status Foto": "Sudah" if r.get("sudah_difoto") else "Belum",
                 "Asal": r.get("asal", ""),
                 "First Impression": r.get("first_impression", ""),
+                "Lokasi GPS": r.get("lokasi_gps", ""),
+                "Google Maps Link": gmaps_link,
                 "Waktu Foto": r.get("waktu_foto", ""),
                 "URL Foto": photo_url
             })

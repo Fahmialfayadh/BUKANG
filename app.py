@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+from streamlit_js_eval import get_geolocation
 from utils.supabase_client import (
     get_supabase_client,
     cari_mahasiswa,
@@ -10,9 +11,8 @@ from utils.supabase_client import (
     get_mahasiswa_belum_difoto,
     get_all_mahasiswa
 )
-from utils.image_processor import compress_image, get_image_size_kb
+from utils.image_processor import compress_and_stamp_image, get_image_size_kb, extract_exif_gps
 from utils.excel_exporter import export_mahasiswa_to_excel
-from scripts.benchmark_upload import run_benchmark
 
 # Page Configuration
 st.set_page_config(
@@ -63,7 +63,7 @@ st.markdown("""
 
 # Application Header
 st.markdown('<div class="main-header">BUKANG - Pendataan Foto Angkatan</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-header">Sistem Pengambilan Foto & Informasi Mahasiswa Real-Time</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-header">Sistem Pengambilan Foto & Geotag Mahasiswa Real-Time</div>', unsafe_allow_html=True)
 
 # Check Supabase connection state
 client = get_supabase_client()
@@ -95,6 +95,11 @@ with tab_input:
         file_photo = st.file_uploader("Pilih foto dari perangkat", type=["jpg", "jpeg", "png"], key="file_source")
         if file_photo:
             foto_input = file_photo
+
+    # Extract EXIF Geotag if photo from file
+    exif_lat, exif_lon = (None, None)
+    if foto_input:
+        exif_lat, exif_lon = extract_exif_gps(foto_input)
 
     st.markdown("---")
     st.subheader("2. Identitas & Pencarian Mahasiswa")
@@ -148,11 +153,34 @@ with tab_input:
                     unsafe_allow_html=True
                 )
 
+    # Get real-time browser Geolocation asynchronously without page reload
+    geo_data = get_geolocation()
+
+    auto_lat = None
+    auto_lon = None
+
+    if geo_data and "coords" in geo_data:
+        auto_lat = round(geo_data["coords"]["latitude"], 6)
+        auto_lon = round(geo_data["coords"]["longitude"], 6)
+    elif exif_lat is not None and exif_lon is not None:
+        auto_lat = exif_lat
+        auto_lon = exif_lon
+
     st.markdown("---")
-    st.subheader("3. Informasi Tambahan")
+    st.subheader("3. Informasi Tambahan & Geotag")
 
     asal_input = st.text_input("Kota / Daerah Asal", placeholder="Contoh: Surabaya / Jakarta")
     impression_input = st.text_area("First Impression / Catatan Singkat", placeholder="Contoh: Ramah, hobi main basket")
+
+    # Dynamic Geotag Status Display
+    if auto_lat is not None and auto_lon is not None:
+        final_lat = auto_lat
+        final_lon = auto_lon
+        st.success(f"GPS HP Terhubung: {final_lat:.6f}, {final_lon:.6f} ([Lihat di Google Maps](https://www.google.com/maps?q={final_lat},{final_lon}))")
+    else:
+        final_lat = None
+        final_lon = None
+        st.info("Menghubungkan ke GPS HP... Pastikan izin Lokasi (Location) diizinkan di browser HP Anda.")
 
     st.markdown("---")
 
@@ -163,9 +191,17 @@ with tab_input:
             st.error("Gagal: Mahasiswa belum dipilih dari hasil pencarian.")
         else:
             try:
-                with st.spinner("Mengompresi foto & mengunggah ke Supabase..."):
-                    # 1. Compress Image
-                    compressed_bytes = compress_image(foto_input, max_size=1080, quality=80)
+                with st.spinner("Mengompresi foto, memasang Geotag watermark & mengunggah ke Supabase..."):
+                    # 1. Compress Image & Stamp Geotag Watermark onto Photo
+                    compressed_bytes = compress_and_stamp_image(
+                        foto_input,
+                        max_size=1080,
+                        quality=80,
+                        lat=final_lat,
+                        lon=final_lon,
+                        nrp=selected_student["nrp"],
+                        nama=selected_student["nama"]
+                    )
                     size_kb = get_image_size_kb(compressed_bytes)
 
                     # 2. Insert manual student if applicable
@@ -176,12 +212,14 @@ with tab_input:
                             selected_student.get("prodi_asal", "")
                         )
 
-                    # 3. Save photo & metadata to Supabase
+                    # 3. Save photo, metadata & geotag to Supabase
                     simpan_foto_dan_data(
                         selected_student["nrp"],
                         compressed_bytes,
                         asal_input,
-                        impression_input
+                        impression_input,
+                        lat=final_lat,
+                        lon=final_lon
                     )
 
                 st.success(f"Berhasil! Foto ({size_kb} KB) dan data untuk {selected_student['nama']} ({selected_student['nrp']}) telah tersimpan.")
@@ -240,7 +278,7 @@ with tab_progress:
 # -----------------------------------------------------------------------------
 with tab_tools:
     st.subheader("1. Ekspor Data ke Excel")
-    st.write("Unduh seluruh data mahasiswa beserta status pendataan, informasi tambahan, dan URL foto dari Supabase Storage.")
+    st.write("Unduh seluruh data mahasiswa beserta status pendataan, informasi tambahan, Geotag lokasi, dan URL foto dari Supabase Storage.")
 
     if st.button("Generate File Excel"):
         with st.spinner("Mengambil data dari Supabase..."):
@@ -262,6 +300,7 @@ with tab_tools:
     num_trials = st.slider("Jumlah Pengujian Upload", min_value=1, max_value=10, value=3)
     if st.button("Jalankan Uji Benchmark Network"):
         with st.spinner("Menjalankan pengujian upload ke Supabase Storage..."):
+            from scripts.benchmark_upload import run_benchmark
             res = run_benchmark(num_samples=num_trials, target_size_kb=400)
             if "error" in res:
                 st.error(res["error"])

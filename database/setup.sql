@@ -16,8 +16,17 @@ create table if not exists mahasiswa (
     photo_path text,
     asal text,
     first_impression text,
+    latitude double precision,
+    longitude double precision,
+    lokasi_gps text,
     waktu_foto timestamptz
 );
+
+-- Migration for existing table
+alter table mahasiswa add column if not exists latitude double precision;
+alter table mahasiswa add column if not exists longitude double precision;
+alter table mahasiswa add column if not exists lokasi_gps text;
+
 
 -- 3. Create Indexes for Fast Lookup & Fuzzy Search
 create index if not exists idx_nama_trgm on mahasiswa using gin (nama gin_trgm_ops);
